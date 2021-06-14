@@ -1,6 +1,6 @@
 ---
-title: "Cyclistic Bike Share Analysis"
-author: "vineet"
+title: "Case Study- Cyclistic Bike Share Analysis"
+author: "Vineet"
 date: "14 June 2021"
 output: html_document
 ---
@@ -9,22 +9,294 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Introduction
+A case study on a fictional company, Cyclistic, that runs a bike-sharing program in the city of Chicago
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+## Purpose
+* To analyze data of all bike rides taken through the program between May 2020 to Apr 2021
+* To maximize the number of annual memberships
+* To understand how the two types of riders, i.e. Casual and Member, use the program differently
+* To reccomend strategies to convert casual riders into members
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Data
+We're using historical data from divvy, a bike sharing service in Chicago operated by Motivate International Inc.
+The data is public, reliable and from a credile source
 
-```{r cars}
-summary(cars)
+```{r}
+# Load R Packages to use
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(geosphere)
 ```
 
-## Including Plots
+## Collect and Read Data
 
-You can also embed plots, for example:
+```{r}
+#============================
+#STEP 1 COLLECT AND READ DATA
+#============================
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Read csv files
+
+df1 <- read_csv("../Data/divvy/bikeshare-trip-details-data/01_May_2020.csv")
+df2 <- read_csv("../Data/divvy/bikeshare-trip-details-data/02_Jun_2020.csv")
+df3 <- read_csv("../Data/divvy/bikeshare-trip-details-data/03_Jul_2020.csv")
+df4 <- read_csv("../Data/divvy/bikeshare-trip-details-data/04_Aug_2020.csv")
+df5 <- read_csv("../Data/divvy/bikeshare-trip-details-data/05_Sept_2020.csv")
+df6 <- read_csv("../Data/divvy/bikeshare-trip-details-data/06_Oct_2020.csv")
+df7 <- read_csv("../Data/divvy/bikeshare-trip-details-data/07_Nov_2020.csv")
+df8 <- read_csv("../Data/divvy/bikeshare-trip-details-data/08_Dec_2020.csv")
+df9 <- read_csv("../Data/divvy/bikeshare-trip-details-data/09_Jan_2021.csv")
+df10 <- read_csv("../Data/divvy/bikeshare-trip-details-data/10_Feb_2021.csv")
+df11 <- read_csv("../Data/divvy/bikeshare-trip-details-data/11_Mar_2021.csv")
+df12 <- read_csv("../Data/divvy/bikeshare-trip-details-data/12_Apr_2021.csv")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Wrangle and Combine Data
+
+```{r}
+#=================================
+#STEP 2 - WRANGLE AND COMBINE DATA
+#=================================
+
+# Fix data type issues with columns
+df1$started_at <- as.POSIXct(df1$started_at, format="%m/%d/%Y %H:%M")
+df1$ended_at <- as.POSIXct(df1$ended_at, format="%m/%d/%Y %H:%M")
+df2$started_at <- as.POSIXct(df2$started_at, format="%m/%d/%Y %H:%M")
+df2$ended_at <- as.POSIXct(df2$ended_at, format="%m/%d/%Y %H:%M")
+
+df8$start_station_id <- as.double(df8$start_station_id)
+df8$end_station_id <- as.double(df8$end_station_id)
+df9$start_station_id <- as.double(df9$start_station_id)
+df9$end_station_id <- as.double(df9$end_station_id)
+df10$start_station_id <- as.double(df10$start_station_id)
+df10$end_station_id <- as.double(df10$end_station_id)
+df11$start_station_id <- as.double(df11$start_station_id)
+df11$end_station_id <- as.double(df11$end_station_id)
+df12$start_station_id <- as.double(df12$start_station_id)
+df12$end_station_id <- as.double(df12$end_station_id)
+
+# Combine all data to a single dataframe
+df_all_trips = bind_rows(df1, df2, df3, df4, df5, df6, df7, df8, df9, df10, df11, df12)
+head(df_all_trips)
+```
+
+*Note: We're ignoring the warnings caused because of "NA" values introduced while converting start_station_id & end_station_id to integer. This won't impact our analysis*
+
+
+```{r}
+# SUMMARY
+summary(df_all_trips)
+```
+
+There are NA values in end_lat & end_lng columns. We will set these NA values with their respective mean values
+
+```{r}
+#=================================================
+# STEP 3: CLEAN DATA AND PREPARE DATA FOR ANALYSIS
+#=================================================
+
+#Set NA to mean value to ride's end coordinates
+df_all_trips$end_lat[is.na(df_all_trips$end_lat)] <- mean(df_all_trips$end_lat, na.rm = TRUE)
+df_all_trips$end_lng[is.na(df_all_trips$end_lng)] <- mean(df_all_trips$end_lng, na.rm = TRUE)
+
+# Add new columns for analysis
+df_all_trips$ride_length <- df_all_trips$ended_at - df_all_trips$started_at
+df_all_trips <- df_all_trips %>% 
+  mutate(dist_travelled = distHaversine(cbind(start_lat, start_lng), cbind(end_lat, end_lng)))
+
+df_all_trips$date <- as.Date(df_all_trips$started_at)
+df_all_trips$day <- format(df_all_trips$date, "%d")
+df_all_trips$day_of_week <- weekdays(as.Date(df_all_trips$started_at))
+df_all_trips$month <- months(df_all_trips$date)
+df_all_trips$year <- format(df_all_trips$date, "%Y")
+
+# Review data with newly added columns arranged by ride_length
+head(arrange(df_all_trips, ride_length))
+```
+
+There are -ve values in the ride_length column that don't make sense. We will remove these values from our analysis
+
+```{r}
+#==========================================================
+# STEP 3: CLEAN DATA AND PREPARE DATA FOR ANALYSIS (contd.)
+#==========================================================
+
+# Check number of records and Remove trips with negative ride length
+cat("Original no of Rows = ",nrow(df_all_trips),'\n')
+cat("No of Rows with ride duration < 0 seconds = ", sum(df_all_trips$ride_length < 0),'\n')
+
+df_all_trips_v2 <- df_all_trips[!(df_all_trips$ride_length < 0),]
+cat("Updated no of Rows = ", nrow(df_all_trips_v2))
+
+# Order day_of_week to start from Monday and months to start from May '20
+df_all_trips_v2$day_of_week <- ordered(df_all_trips_v2$day_of_week, levels=c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")) 
+df_all_trips_v2$month <- ordered(df_all_trips_v2$month, levels=c("May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March", "April")) 
+
+# View updated dataframe
+head(df_all_trips_v2)
+```
+
+## Analyze Data
+
+```{r}
+#=====================
+# STEP 4: ANALYZE DATA
+#=====================
+
+# Reduce tendency to display axis values in Scientific notation
+options(scipen = 100)
+
+# 1) Proportion of rides taken by rider type
+ggp1 <- df_all_trips_v2 %>% 
+  group_by(member_casual) %>%
+  summarise(number_of_rides = n()) %>%
+  arrange(member_casual) %>%
+  ggplot(aes(x = "",y = number_of_rides, fill = member_casual)) + geom_bar(stat="identity", width=1) + coord_polar("y", start=0)
+ggp1 + labs(y="No of Rides") + scale_y_continuous(labels = comma) + geom_text(aes(label = percent(number_of_rides/sum(number_of_rides))))
+```
+
+#### Analysis:
+* In the last 12 months, i.e. May '20 to Apr '21, a considerable amount of rides have been taken by casual riders (41%)
+
+#### Thus, a great opportunity lies here to convert the casual riders to members. This calls for further analysis
+
+```{r}
+#==============================
+# STEP 4: ANALYZE DATA (contd.)
+#==============================
+
+# 2) a) Plot no of rides by weekday
+ggp2a <- df_all_trips_v2 %>% 
+  group_by(member_casual, day_of_week) %>% 
+  summarise(number_of_rides = n(), .groups = "drop") %>%
+  arrange(member_casual, day_of_week) %>%
+  ggplot(aes(x = day_of_week, y = number_of_rides, fill = member_casual)) + geom_col()
+ggp2a + labs(x="Day of Week", y="No of rides") + scale_y_continuous(labels = comma)
+```
+
+#### Analysis:
+* Maximum no of Total Rides are taken during the weekend
+* On Weekdays, most of the rides are taken by members
+* However, on weekends roughly half of the rides are taken by casual riders
+
+```{r}
+#==============================
+# STEP 4: ANALYZE DATA (contd.)
+#==============================
+
+# 2) b) Plot avg ride duration by weekday
+ggp2b <- df_all_trips_v2 %>% 
+  group_by(member_casual, day_of_week) %>% 
+  summarise(avg_duration = mean(ride_length/60), .groups = "drop") %>%
+  arrange(member_casual, day_of_week) %>%
+  ggplot(aes(x = day_of_week, y = as.numeric(avg_duration), fill = member_casual)) + geom_bar(position="dodge", stat="identity")
+ggp2b + labs(x="Day of Week", y="Avg Ride Duration (in mins)")
+```
+
+#### Analyis:
+* Casual riders on an average take longer trips when using the bikes and the trip length is greater in the weekends
+* Members, on the other hand, have a consistent average over the week indicating  they're probably using the bike to commute to work or for regular exercise
+
+### Recommendation 1: 
+* Focus on targeting casual riders during the weekend
+* On weekends, offer discounts for new annual memberships
+* Promote benefits of cycling regularly to entice the weekend casual riders to pick up regular cycling like the members
+
+```{r}
+#==============================
+# STEP 4: ANALYZE DATA (contd.)
+#==============================
+
+# 2) c) Plot avg ride duration by rider type
+ggp2c <- df_all_trips_v2 %>% 
+  group_by(member_casual) %>% 
+  summarise(avg_duration = mean(ride_length/60), .groups = "drop") %>% 
+  arrange(member_casual) %>% 
+  ggplot(aes(x = member_casual, y = as.numeric(avg_duration), fill = member_casual)) + geom_col()
+ggp2c + labs(y="Avg Ride Duration (in mins)")
+
+# 2) d) Plot avg distance travelled by rider type
+ggp2d <- df_all_trips_v2 %>% 
+  group_by(member_casual) %>% 
+  summarise(avg_dist_travelled = mean(dist_travelled), .groups = "drop") %>% 
+  arrange(member_casual) %>% 
+  ggplot(aes(x = member_casual, y = avg_dist_travelled, fill = member_casual)) + geom_col()
+ggp2d + labs(y="Avg Distance travelled (in metres)") + scale_y_continuous(labels = comma)
+
+# Report limitation of round trips
+zero_dist <- df_all_trips %>% filter(dist_travelled == 0) %>% nrow()
+total_rows <- nrow(df_all_trips)
+cat("There are ",zero_dist," (",percent(zero_dist/total_rows),") values with dist_travelled = 0")
+```
+
+#### Analyis:
+* Casual riders on an average take more time to complete their ride but the distance travelled by them is roughly the same as members, this suggests that casual riders take rides for leisure
+* Also, this cements the fact that members are riding fast for routine activities
+
+*Limitation: The above analysis doesn't consider 9% of trips with dist_travelled = 0 that are either round trips or when the bike was taken but not ridden. This doesn't skew the results that much and the general analysis would hold true*
+
+### Recommendation 2:
+* Conduct leisure activities like guided bicyle tours to attract existing and new casual riders and in-turn open greater potential to convert them to members
+* Offer greater exposure and discounts on such activies with membership
+
+```{r}
+#==============================
+# STEP 4: ANALYZE DATA (contd.)
+#==============================
+
+# 3) No of rides by month
+ggp3 <- df_all_trips_v2 %>% 
+  group_by(member_casual, month) %>% 
+  summarise(number_of_rides = n(), .groups = "drop") %>%
+  arrange(member_casual, month) %>%
+  ggplot(aes(x = month, y = number_of_rides, fill = member_casual)) + geom_col()
+ggp3 + labs(y="No of Rides") + scale_y_continuous(labels = comma) + theme(axis.text.x = element_text(angle=45, hjust = 1))
+```
+
+#### Analysis:
+* Maximum rides are taken during the months form July to September
+* The trend suggests that the no of rides taken are very low in the winter season (N.Hemisphere) but they shoot back up in the spring and summer seaons
+
+### Recommendation 3
+* Focus on marketing campaigns during the spring and summer months
+
+```{r}
+#==============================
+# STEP 4: ANALYZE DATA (contd.)
+#==============================
+
+# 4) a) Plot no of rides by bike type
+ggp4a <- df_all_trips_v2 %>% 
+  group_by(member_casual, rideable_type) %>% 
+  summarise(number_of_rides = n(), .groups = "drop") %>%
+  arrange(member_casual, rideable_type) %>%
+  ggplot(aes(x = rideable_type, y = number_of_rides, fill = member_casual)) + geom_col()
+ggp4a + labs(x="Bike type", y="No of Rides") + scale_y_continuous(labels = comma)
+
+# 4) b) Plot avg ride duration by bike type
+ggp4b <- df_all_trips_v2 %>% 
+  group_by(member_casual, rideable_type) %>% 
+  summarise(average_duration = mean(ride_length/60), .groups = "drop") %>%
+  arrange(member_casual, rideable_type) %>%
+  ggplot(aes(x = rideable_type, y = as.numeric(average_duration), fill = member_casual)) + geom_bar(position="dodge", stat="identity")
+ggp4b + labs(x="Bike type", y="Avg Ride Duration (in mins)") + scale_y_continuous(labels = comma)
+```
+
+#### Analysis:
+* Docked bike is the most used bike
+* Docked bike also has the highest average ride duration
+
+### Recommendation 4
+* Keep adequate no of docked bikes in supply throughout the City
+
+## Conclusion:
+* There is a great opprortunity to convert casual riders to members
+* Most traffic of users is during the weekends
+* Discounting annual memberships and promoting benefits of cycling can help convert casual riders to members
+* Casual riders mostly take trips for leisure
+* Conducting planned leisure activities could atttract more people
+* The spring & summer months are the best times to launch a marketing campaign
+* The docked bike is the most used bike
